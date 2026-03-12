@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>小恐龍：加速回歸修正版</title>
+    <style>
+        body { text-align: center; font-family: 'Segoe UI', sans-serif; background-color: #f0f0f0; margin: 0; padding: 20px; }
+        #gameContainer { width: 800px; margin: 20px auto; position: relative; }
+        canvas { background-color: #fff; border-bottom: 3px solid #333; display: block; box-shadow: 0 10px 20px rgba(0,0,0,0.1); width: 800px; height: 200px; }
+        .info { color: #555; }
+        .status { font-weight: bold; color: #e67e22; height: 24px; margin-top: 10px; }
+        .speed-monitor { font-family: monospace; color: #2980b9; font-size: 14px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <h2 class="info">按下 [空白鍵] 開始 / 跳躍</h2>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    <div id="status" class="status"></div>
+    <div id="speedMonitor" class="speed-monitor">正常速度: 5.0 | 當前速度: 5.0</div>
+    <h3 id="score" class="info">分數: 0</h3>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const statusElement = document.getElementById('status');
+        const speedMonitor = document.getElementById('speedMonitor');
+
+        canvas.width = 800;
+        canvas.height = 200;
+
+        const STATE = { WAITING: 0, PLAYING: 1, GAMEOVER: 2 };
+        let currentState = STATE.WAITING;
+
+        // 速度邏輯核心變數
+        let score = 0;
+        let timer = 0;
+        let baseSpeed = 5;    // 隨分數成長的正常速度
+        let gameSpeed = 5;    // 實際運作速度
+        let boostTimer = 0;   // 道具效果剩餘幀數
+        const BOOST_MULT = 1.8; // 道具加速倍率
+
+        let obstacles = [];
+        let birds = [];
+        let items = [];
+
+        const dino = {
+            x: 50, y: 150, width: 40, height: 40,
+            dy: 0, jumpForce: 10, gravity: 0.5, jumpCount: 0,
+            draw() {
+                // 道具期間恐龍會閃爍金光
+                ctx.fillStyle = boostTimer > 0 ? (timer % 10 < 5 ? '#f1c40f' : '#e67e22') : '#555';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            },
+            update() {
+                this.dy += this.gravity;
+                this.y += this.dy;
+                if (this.y + this.height >= canvas.height) {
+                    this.y = canvas.height - this.height;
+                    this.dy = 0;
+                    this.jumpCount = 0;
+                }
+            },
+            jump() {
+                if (this.jumpCount < 2) {
+                    this.dy = -this.jumpForce;
+                    this.jumpCount++;
+                }
+            }
+        };
+
+        function resetGame() {
+            score = 0; timer = 0; boostTimer = 0;
+            baseSpeed = 5; gameSpeed = 5;
+            obstacles = []; birds = []; items = [];
+            dino.y = 150; dino.dy = 0; dino.jumpCount = 0;
+            statusElement.innerText = "";
+        }
+
+        function handleLogic() {
+            timer++;
+            
+            // --- 核心速度處理邏輯 ---
+            // 1. 計算目前的「正常速度」（隨分數增加，每 500 分增加 0.5）
+            baseSpeed = 5 + (Math.floor(score / 500) * 0.5);
+
+            // 2. 判斷是否在道具效果內
+            if (boostTimer > 0) {
+                boostTimer--;
+                gameSpeed = baseSpeed * BOOST_MULT; // 執行加速
+                statusElement.innerText = "⚡ 道具加速中！ (無視仙人掌) ⚡";
+            } else {
+                // 3. 效果結束後，自動回到當前的基礎速度
+                gameSpeed = baseSpeed; 
+                statusElement.innerText = "";
+            }
+
+            // 更新儀表板顯示
+            speedMonitor.innerText = `正常速度: ${baseSpeed.toFixed(1)} | 當前速度: ${gameSpeed.toFixed(1)} ${boostTimer > 0 ? '(BOOST!)' : ''}`;
+
+            // 生成邏輯
+            if (timer % 100 === 0) obstacles.push({ x: 800, y: 160, width: 25, height: 40 });
+            if (timer % 180 === 0) {
+                birds.push({ 
+                    x: 800, baseY: 80, width: 35, height: 25, 
+                    offset: Math.random() * 10,
+                    amp: 40 + Math.random() * 40, // 擺動幅度
+                    freq: 0.1 + Math.random() * 0.1 // 擺動頻率
+                });
+            }
+            if (timer % 600 === 0) items.push({ x: 800, y: 60, width: 25, height: 25 });
+
+            // 仙人掌處理
+            obstacles.forEach((ob, i) => {
+                ob.x -= gameSpeed;
+                ctx.fillStyle = '#27ae60';
+                ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
+                if (checkCollision(dino, ob)) {
+                    if (boostTimer > 0) { obstacles.splice(i, 1); score += 100; }
+                    else currentState = STATE.GAMEOVER;
+                }
+            });
+
+            // 小鳥處理 (包含擺動)
+            birds.forEach((b, i) => {
+                b.x -= (gameSpeed + 1);
+                b.y = b.baseY + Math.sin(timer * b.freq + b.offset) * b.amp;
+                ctx.fillStyle = '#8e44ad';
+                ctx.fillRect(b.x, b.y, b.width, b.height);
+                if (checkCollision(dino, b)) currentState = STATE.GAMEOVER;
+            });
+
+            // 道具處理
+            items.forEach((it, i) => {
+                it.x -= gameSpeed;
+                ctx.fillStyle = '#f1c40f';
+                ctx.beginPath();
+                ctx.arc(it.x + 12, it.y + 12, 12, 0, Math.PI * 2);
+                ctx.fill();
+                if (checkCollision(dino, it)) {
+                    items.splice(i, 1);
+                    boostTimer = 300; // 效果持續時間 (約 5 秒)
+                }
+            });
+
+            // 清理
+            obstacles = obstacles.filter(o => o.x > -50);
+            birds = birds.filter(b => b.x > -50);
+            items = items.filter(it => it.x > -50);
+
+            score++;
+            scoreElement.innerText = `分數: ${score}`;
+        }
+
+        function checkCollision(a, b) {
+            return a.x < b.x + b.width && a.x + a.width > b.x &&
+                   a.y < b.y + b.height && a.y + a.height > b.y;
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            dino.draw();
+
+            if (currentState === STATE.WAITING) {
+                ctx.fillStyle = "rgba(0,0,0,0.5)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "white";
+                ctx.textAlign = "center";
+                ctx.font = "24px Arial";
+                ctx.fillText("按下 [空白鍵] 開始遊戲", canvas.width / 2, canvas.height / 2 + 10);
+            } else if (currentState === STATE.PLAYING) {
+                dino.update();
+                handleLogic();
+            } else if (currentState === STATE.GAMEOVER) {
+                ctx.fillStyle = "rgba(0,0,0,0.8)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "white";
+                ctx.textAlign = "center";
+                ctx.font = "bold 30px Arial";
+                ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
+                ctx.font = "20px Arial";
+                ctx.fillText(`最終得分: ${score} | 按下 [空白鍵] 重玩`, canvas.width / 2, canvas.height / 2 + 30);
+            }
+            requestAnimationFrame(animate);
+        }
+
+        function handleInput() {
+            if (currentState !== STATE.PLAYING) {
+                resetGame();
+                currentState = STATE.PLAYING;
+            } else {
+                dino.jump();
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') { e.preventDefault(); handleInput(); }
+        });
+        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); });
+
+        animate();
+    </script>
+</body>
+</html>
