@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>小恐龍：加速回歸修正版</title>
+    <title>超速方塊</title>
     <style>
         body { text-align: center; font-family: 'Segoe UI', sans-serif; background-color: #f0f0f0; margin: 0; padding: 20px; }
         #gameContainer { width: 800px; margin: 20px auto; position: relative; }
@@ -84,7 +84,7 @@
             
             // --- 核心速度處理邏輯 ---
             // 1. 計算目前的「正常速度」（隨分數增加，每 500 分增加 0.5）
-            baseSpeed = 5 + (Math.floor(score / 500) * 0.5);
+            baseSpeed = 5 + (Math.floor(score / 200) * 0.5);
 
             // 2. 判斷是否在道具效果內
             if (boostTimer > 0) {
