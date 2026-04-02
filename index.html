@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>超速方塊</title>
+    <title>超速方塊 - 聯網排行榜版</title>
     <style>
         body { text-align: center; font-family: 'Segoe UI', sans-serif; background-color: #f0f0f0; margin: 0; padding: 20px; }
         #gameContainer { width: 800px; margin: 20px auto; position: relative; }
@@ -10,6 +10,25 @@
         .info { color: #555; }
         .status { font-weight: bold; color: #e67e22; height: 24px; margin-top: 10px; }
         .speed-monitor { font-family: monospace; color: #2980b9; font-size: 14px; margin-top: 5px; }
+
+        /* 排行榜樣式 */
+        #leaderboardContainer {
+            width: 400px;
+            margin: 20px auto;
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .leaderboard-title { color: #2c3e50; margin-bottom: 10px; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+        .score-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 15px;
+            border-bottom: 1px solid #f9f9f9;
+        }
+        .score-row:last-child { border-bottom: none; }
+        .rank { font-weight: bold; color: #e67e22; }
     </style>
 </head>
 <body>
@@ -21,7 +40,50 @@
     <div id="speedMonitor" class="speed-monitor">正常速度: 5.0 | 當前速度: 5.0</div>
     <h3 id="score" class="info">分數: 0</h3>
 
-    <script>
+    <div id="leaderboardContainer">
+        <h3 class="leaderboard-title">🏆 世界排行榜 (TOP 5)</h3>
+        <div id="leaderboardList">讀取中...</div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // Firebase 配置
+        const firebaseConfig = {
+            apiKey: "AIzaSyA4uo_WEMOzIllI4rbjfTIagTBYa7kHkrA",
+            authDomain: "block-rush-d4013.firebaseapp.com",
+            projectId: "block-rush-d4013",
+            storageBucket: "block-rush-d4013.firebasestorage.app",
+            messagingSenderId: "53425350428",
+            appId: "1:53425350428:web:03eb48c6c8388a25fcbcd9",
+            measurementId: "G-849SJY61EY"
+        };
+
+        // 初始化 Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const scoresRef = collection(db, "highScores");
+
+        // --- 排行榜即時更新邏輯 ---
+        const leaderboardList = document.getElementById('leaderboardList');
+        const q = query(scoresRef, orderBy("score", "desc"), limit(5));
+
+        onSnapshot(q, (snapshot) => {
+            leaderboardList.innerHTML = "";
+            let i = 1;
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                leaderboardList.innerHTML += `
+                    <div class="score-row">
+                        <span><span class="rank">#${i++}</span> ${data.name}</span>
+                        <span>${data.score} 分</span>
+                    </div>`;
+            });
+            if (snapshot.empty) leaderboardList.innerHTML = "尚無資料，快來搶首榜！";
+        });
+
+        // --- 遊戲邏輯開始 ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const scoreElement = document.getElementById('score');
@@ -34,13 +96,12 @@
         const STATE = { WAITING: 0, PLAYING: 1, GAMEOVER: 2 };
         let currentState = STATE.WAITING;
 
-        // 速度邏輯核心變數
         let score = 0;
         let timer = 0;
-        let baseSpeed = 5;    // 隨分數成長的正常速度
-        let gameSpeed = 5;    // 實際運作速度
-        let boostTimer = 0;   // 道具效果剩餘幀數
-        const BOOST_MULT = 1.8; // 道具加速倍率
+        let baseSpeed = 5;
+        let gameSpeed = 5;
+        let boostTimer = 0;
+        const BOOST_MULT = 1.8;
 
         let obstacles = [];
         let birds = [];
@@ -50,7 +111,6 @@
             x: 50, y: 150, width: 40, height: 40,
             dy: 0, jumpForce: 10, gravity: 0.5, jumpCount: 0,
             draw() {
-                // 道具期間恐龍會閃爍金光
                 ctx.fillStyle = boostTimer > 0 ? (timer % 10 < 5 ? '#f1c40f' : '#e67e22') : '#555';
                 ctx.fillRect(this.x, this.y, this.width, this.height);
             },
@@ -71,6 +131,21 @@
             }
         };
 
+        async function saveScore(finalScore) {
+            const name = prompt(`遊戲結束！獲得 ${finalScore} 分！\n請輸入你的名字：`, "匿名玩家");
+            if (name) {
+                try {
+                    await addDoc(scoresRef, {
+                        name: name,
+                        score: finalScore,
+                        timestamp: serverTimestamp()
+                    });
+                } catch (e) {
+                    console.error("儲存分數失敗: ", e);
+                }
+            }
+        }
+
         function resetGame() {
             score = 0; timer = 0; boostTimer = 0;
             baseSpeed = 5; gameSpeed = 5;
@@ -81,58 +156,54 @@
 
         function handleLogic() {
             timer++;
-            
-            // --- 核心速度處理邏輯 ---
-            // 1. 計算目前的「正常速度」（隨分數增加，每 500 分增加 0.5）
             baseSpeed = 5 + (Math.floor(score / 200) * 0.5);
 
-            // 2. 判斷是否在道具效果內
             if (boostTimer > 0) {
                 boostTimer--;
-                gameSpeed = baseSpeed * BOOST_MULT; // 執行加速
+                gameSpeed = baseSpeed * BOOST_MULT;
                 statusElement.innerText = "⚡ 道具加速中！ (無視仙人掌) ⚡";
             } else {
-                // 3. 效果結束後，自動回到當前的基礎速度
                 gameSpeed = baseSpeed; 
                 statusElement.innerText = "";
             }
 
-            // 更新儀表板顯示
             speedMonitor.innerText = `正常速度: ${baseSpeed.toFixed(1)} | 當前速度: ${gameSpeed.toFixed(1)} ${boostTimer > 0 ? '(BOOST!)' : ''}`;
 
-            // 生成邏輯
             if (timer % 100 === 0) obstacles.push({ x: 800, y: 160, width: 25, height: 40 });
             if (timer % 180 === 0) {
                 birds.push({ 
                     x: 800, baseY: 80, width: 35, height: 15, 
                     offset: Math.random() * 10,
-                    amp: 40 + Math.random() * 40, // 擺動幅度
-                    freq: 0.1 + Math.random() * 0.1 // 擺動頻率
+                    amp: 40 + Math.random() * 40,
+                    freq: 0.1 + Math.random() * 0.1
                 });
             }
             if (timer % 600 === 0) items.push({ x: 800, y: 60, width: 25, height: 25 });
 
-            // 仙人掌處理
             obstacles.forEach((ob, i) => {
                 ob.x -= gameSpeed;
                 ctx.fillStyle = '#27ae60';
                 ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
                 if (checkCollision(dino, ob)) {
                     if (boostTimer > 0) { obstacles.splice(i, 1); score += 100; }
-                    else currentState = STATE.GAMEOVER;
+                    else {
+                        currentState = STATE.GAMEOVER;
+                        saveScore(score);
+                    }
                 }
             });
 
-            // 小鳥處理 (包含擺動)
             birds.forEach((b, i) => {
                 b.x -= (gameSpeed + 1);
                 b.y = b.baseY + Math.sin(timer * b.freq + b.offset) * b.amp;
                 ctx.fillStyle = '#8e44ad';
                 ctx.fillRect(b.x, b.y, b.width, b.height);
-                if (checkCollision(dino, b)) currentState = STATE.GAMEOVER;
+                if (checkCollision(dino, b)) {
+                    currentState = STATE.GAMEOVER;
+                    saveScore(score);
+                }
             });
 
-            // 道具處理
             items.forEach((it, i) => {
                 it.x -= gameSpeed;
                 ctx.fillStyle = '#f1c40f';
@@ -141,11 +212,10 @@
                 ctx.fill();
                 if (checkCollision(dino, it)) {
                     items.splice(i, 1);
-                    boostTimer = 300; // 效果持續時間 (約 5 秒)
+                    boostTimer = 300;
                 }
             });
 
-            // 清理
             obstacles = obstacles.filter(o => o.x > -50);
             birds = birds.filter(b => b.x > -50);
             items = items.filter(it => it.x > -50);
