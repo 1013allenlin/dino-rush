@@ -28,7 +28,7 @@
             border-bottom: 1px solid #f9f9f9;
         }
         .score-row:last-child { border-bottom: none; }
-        .rank { font-weight: bold; color: #e67e22; }
+        .rank { font-weight: bold; color: #e67e22; margin-right: 5px; }
     </style>
 </head>
 <body>
@@ -49,15 +49,14 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-        // Firebase 配置
+        // --- 你的新 Firebase 配置 ---
         const firebaseConfig = {
-            apiKey: "AIzaSyA4uo_WEMOzIllI4rbjfTIagTBYa7kHkrA",
-            authDomain: "block-rush-d4013.firebaseapp.com",
-            projectId: "block-rush-d4013",
-            storageBucket: "block-rush-d4013.firebasestorage.app",
-            messagingSenderId: "53425350428",
-            appId: "1:53425350428:web:03eb48c6c8388a25fcbcd9",
-            measurementId: "G-849SJY61EY"
+            apiKey: "AIzaSyApF4WnrcGhBLFgCLiVCByqy-i_7VnkduI",
+            authDomain: "blockrush-d0924.firebaseapp.com",
+            projectId: "blockrush-d0924",
+            storageBucket: "blockrush-d0924.firebasestorage.app",
+            messagingSenderId: "645488897630",
+            appId: "1:645488897630:web:f867d2c53dd602e299cecf"
         };
 
         // 初始化 Firebase
@@ -80,10 +79,13 @@
                         <span>${data.score} 分</span>
                     </div>`;
             });
-            if (snapshot.empty) leaderboardList.innerHTML = "尚無資料，快來搶首榜！";
+            if (snapshot.empty) leaderboardList.innerHTML = "尚無排名，快來挑戰！";
+        }, (error) => {
+            console.error("Firestore 讀取錯誤：", error);
+            leaderboardList.innerHTML = "讀取失敗，請檢查資料庫權限設定。";
         });
 
-        // --- 遊戲邏輯開始 ---
+        // --- 遊戲邏輯 ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const scoreElement = document.getElementById('score');
@@ -132,8 +134,8 @@
         };
 
         async function saveScore(finalScore) {
-            const name = prompt(`遊戲結束！獲得 ${finalScore} 分！\n請輸入你的名字：`, "匿名玩家");
-            if (name) {
+            const name = prompt(`遊戲結束！獲得 ${finalScore} 分！\n請輸入你的大名：`, "新玩家");
+            if (name && name.trim() !== "") {
                 try {
                     await addDoc(scoresRef, {
                         name: name,
@@ -141,7 +143,8 @@
                         timestamp: serverTimestamp()
                     });
                 } catch (e) {
-                    console.error("儲存分數失敗: ", e);
+                    console.error("儲存失敗：", e);
+                    alert("儲存分數失敗，請確認資料庫 Rules 是否已設為測試模式！");
                 }
             }
         }
@@ -157,7 +160,6 @@
         function handleLogic() {
             timer++;
             baseSpeed = 5 + (Math.floor(score / 200) * 0.5);
-
             if (boostTimer > 0) {
                 boostTimer--;
                 gameSpeed = baseSpeed * BOOST_MULT;
@@ -166,7 +168,6 @@
                 gameSpeed = baseSpeed; 
                 statusElement.innerText = "";
             }
-
             speedMonitor.innerText = `正常速度: ${baseSpeed.toFixed(1)} | 當前速度: ${gameSpeed.toFixed(1)} ${boostTimer > 0 ? '(BOOST!)' : ''}`;
 
             if (timer % 100 === 0) obstacles.push({ x: 800, y: 160, width: 25, height: 40 });
@@ -186,10 +187,7 @@
                 ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
                 if (checkCollision(dino, ob)) {
                     if (boostTimer > 0) { obstacles.splice(i, 1); score += 100; }
-                    else {
-                        currentState = STATE.GAMEOVER;
-                        saveScore(score);
-                    }
+                    else gameOver();
                 }
             });
 
@@ -198,10 +196,7 @@
                 b.y = b.baseY + Math.sin(timer * b.freq + b.offset) * b.amp;
                 ctx.fillStyle = '#8e44ad';
                 ctx.fillRect(b.x, b.y, b.width, b.height);
-                if (checkCollision(dino, b)) {
-                    currentState = STATE.GAMEOVER;
-                    saveScore(score);
-                }
+                if (checkCollision(dino, b)) gameOver();
             });
 
             items.forEach((it, i) => {
@@ -210,18 +205,21 @@
                 ctx.beginPath();
                 ctx.arc(it.x + 12, it.y + 12, 12, 0, Math.PI * 2);
                 ctx.fill();
-                if (checkCollision(dino, it)) {
-                    items.splice(i, 1);
-                    boostTimer = 300;
-                }
+                if (checkCollision(dino, it)) { items.splice(i, 1); boostTimer = 300; }
             });
 
             obstacles = obstacles.filter(o => o.x > -50);
             birds = birds.filter(b => b.x > -50);
             items = items.filter(it => it.x > -50);
-
             score++;
             scoreElement.innerText = `分數: ${score}`;
+        }
+
+        function gameOver() {
+            currentState = STATE.GAMEOVER;
+            const finalScore = score;
+            // 稍作延遲，避免 prompt 擋住最後的渲染
+            setTimeout(() => saveScore(finalScore), 100);
         }
 
         function checkCollision(a, b) {
