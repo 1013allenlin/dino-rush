@@ -2,9 +2,10 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>超速方塊 - Realtime Database 版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>超速方塊 - 聯網排行榜版</title>
     <style>
-        body { text-align: center; font-family: 'Segoe UI', sans-serif; background-color: #f0f0f0; margin: 0; padding: 20px; }
+        body { text-align: center; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f0f0; margin: 0; padding: 20px; }
         #gameContainer { width: 800px; margin: 20px auto; position: relative; }
         canvas { background-color: #fff; border-bottom: 3px solid #333; display: block; box-shadow: 0 10px 20px rgba(0,0,0,0.1); width: 800px; height: 200px; }
         .info { color: #555; }
@@ -29,6 +30,7 @@
         }
         .score-row:last-child { border-bottom: none; }
         .rank { font-weight: bold; color: #e67e22; margin-right: 5px; }
+        .loading { color: #999; font-style: italic; }
     </style>
 </head>
 <body>
@@ -41,45 +43,48 @@
     <h3 id="score" class="info">分數: 0</h3>
 
     <div id="leaderboardContainer">
-        <h3 class="leaderboard-title">🏆 即時排行榜 (TOP 5)</h3>
-        <div id="leaderboardList">讀取中...</div>
+        <h3 class="leaderboard-title">🏆 世界排行榜 (TOP 5)</h3>
+        <div id="leaderboardList" class="loading">正在連線至資料庫...</div>
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getDatabase, ref, push, set, query, orderByChild, limitToLast, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-        // 你的 Firebase 配置
+        // --- Firebase 配置 ---
         const firebaseConfig = {
             apiKey: "AIzaSyApF4WnrcGhBLFgCLiVCByqy-i_7VnkduI",
             authDomain: "blockrush-d0924.firebaseapp.com",
+            databaseURL: "https://blockrush-d0924-default-rtdb.firebaseio.com", 
             projectId: "blockrush-d0924",
             storageBucket: "blockrush-d0924.firebasestorage.app",
             messagingSenderId: "645488897630",
-            appId: "1:645488897630:web:f867d2c53dd602e299cecf",
-            // Realtime Database 有時需要手動指定 databaseURL，如果報錯請補上你的資料庫 URL
-            databaseURL: "https://blockrush-d0924-default-rtdb.firebaseio.com" 
+            appId: "1:645488897630:web:f867d2c53dd602e299cecf"
         };
 
+        // 初始化 Firebase
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
         const lbRef = ref(db, 'leaderboard');
 
-        // --- 排行榜監聽 ---
         const leaderboardList = document.getElementById('leaderboardList');
+
+        // --- 1. 排行榜即時監聽邏輯 ---
         const topScoresQuery = query(lbRef, orderByChild('score'), limitToLast(5));
 
         onValue(topScoresQuery, (snapshot) => {
             const data = snapshot.val();
             if (!data) {
-                leaderboardList.innerHTML = "尚無排名";
+                leaderboardList.innerHTML = "尚無排名，快來搶首榜！";
+                leaderboardList.classList.remove('loading');
                 return;
             }
 
-            // Realtime Database 返回的是物件，需要轉成陣列並排序
+            // 將物件轉為陣列並由高分到低分排序
             const sortedList = Object.values(data).sort((a, b) => b.score - a.score);
             
             leaderboardList.innerHTML = "";
+            leaderboardList.classList.remove('loading');
             sortedList.forEach((item, index) => {
                 leaderboardList.innerHTML += `
                     <div class="score-row">
@@ -87,106 +92,193 @@
                         <span>${item.score} 分</span>
                     </div>`;
             });
+        }, (error) => {
+            console.error("連線錯誤:", error);
+            leaderboardList.innerHTML = "連線失敗，請檢查資料庫 Rules 設定。";
         });
 
-        // --- 儲存分數 ---
-        async function saveScore(finalScore) {
-            const name = prompt("遊戲結束！請輸入你的名字：", "新玩家");
-            if (name) {
-                const newScoreRef = push(lbRef);
-                set(newScoreRef, {
-                    name: name,
-                    score: finalScore,
-                    timestamp: Date.now()
-                });
+        // --- 2. 儲存分數邏輯 ---
+        async function saveScoreToFirebase(finalScore) {
+            const name = prompt(`遊戲結束！獲得 ${finalScore} 分！\n請輸入你的名字：`, "新玩家");
+            if (name && name.trim() !== "") {
+                try {
+                    const newScoreRef = push(lbRef);
+                    await set(newScoreRef, {
+                        name: name,
+                        score: finalScore,
+                        timestamp: Date.now()
+                    });
+                } catch (e) {
+                    console.error("儲存失敗:", e);
+                    alert("儲存失敗，請檢查資料庫規則是否已開啟。");
+                }
             }
         }
 
-        // --- 遊戲邏輯控制 ---
+        // --- 3. 遊戲核心代碼 ---
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const scoreElement = document.getElementById('score');
         const statusElement = document.getElementById('status');
         const speedMonitor = document.getElementById('speedMonitor');
 
-        canvas.width = 800; canvas.height = 200;
+        canvas.width = 800;
+        canvas.height = 200;
+
         const STATE = { WAITING: 0, PLAYING: 1, GAMEOVER: 2 };
         let currentState = STATE.WAITING;
+
         let score = 0, timer = 0, baseSpeed = 5, gameSpeed = 5, boostTimer = 0;
         const BOOST_MULT = 1.8;
         let obstacles = [], birds = [], items = [];
 
         const dino = {
-            x: 50, y: 150, width: 40, height: 40, dy: 0, jumpForce: 10, gravity: 0.5, jumpCount: 0,
+            x: 50, y: 150, width: 40, height: 40,
+            dy: 0, jumpForce: 10, gravity: 0.5, jumpCount: 0,
             draw() {
                 ctx.fillStyle = boostTimer > 0 ? (timer % 10 < 5 ? '#f1c40f' : '#e67e22') : '#555';
                 ctx.fillRect(this.x, this.y, this.width, this.height);
             },
             update() {
-                this.dy += this.gravity; this.y += this.dy;
-                if (this.y + this.height >= canvas.height) { this.y = canvas.height - this.height; this.dy = 0; this.jumpCount = 0; }
+                this.dy += this.gravity;
+                this.y += this.dy;
+                if (this.y + this.height >= canvas.height) {
+                    this.y = canvas.height - this.height;
+                    this.dy = 0;
+                    this.jumpCount = 0;
+                }
             },
-            jump() { if (this.jumpCount < 2) { this.dy = -this.jumpForce; this.jumpCount++; } }
+            jump() {
+                if (this.jumpCount < 2) {
+                    this.dy = -this.jumpForce;
+                    this.jumpCount++;
+                }
+            }
         };
+
+        function resetGame() {
+            score = 0; timer = 0; boostTimer = 0;
+            baseSpeed = 5; gameSpeed = 5;
+            obstacles = []; birds = []; items = [];
+            dino.y = 150; dino.dy = 0; dino.jumpCount = 0;
+            statusElement.innerText = "";
+        }
 
         function handleLogic() {
             timer++;
             baseSpeed = 5 + (Math.floor(score / 200) * 0.5);
-            gameSpeed = boostTimer > 0 ? (boostTimer--, baseSpeed * BOOST_MULT) : baseSpeed;
-            statusElement.innerText = boostTimer > 0 ? "⚡ 道具加速中！ (無視仙人掌) ⚡" : "";
+            if (boostTimer > 0) {
+                boostTimer--;
+                gameSpeed = baseSpeed * BOOST_MULT;
+                statusElement.innerText = "⚡ 道具加速中！ (無視仙人掌) ⚡";
+            } else {
+                gameSpeed = baseSpeed; 
+                statusElement.innerText = "";
+            }
+
             speedMonitor.innerText = `正常速度: ${baseSpeed.toFixed(1)} | 當前速度: ${gameSpeed.toFixed(1)} ${boostTimer > 0 ? '(BOOST!)' : ''}`;
 
             if (timer % 100 === 0) obstacles.push({ x: 800, y: 160, width: 25, height: 40 });
-            if (timer % 180 === 0) birds.push({ x: 800, baseY: 80, width: 35, height: 15, offset: Math.random() * 10, amp: 40 + Math.random() * 40, freq: 0.1 + Math.random() * 0.1 });
+            if (timer % 180 === 0) {
+                birds.push({ 
+                    x: 800, baseY: 80, width: 35, height: 15, 
+                    offset: Math.random() * 10,
+                    amp: 40 + Math.random() * 40,
+                    freq: 0.1 + Math.random() * 0.1
+                });
+            }
             if (timer % 600 === 0) items.push({ x: 800, y: 60, width: 25, height: 25 });
 
             obstacles.forEach((ob, i) => {
                 ob.x -= gameSpeed;
-                ctx.fillStyle = '#27ae60'; ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
+                ctx.fillStyle = '#27ae60';
+                ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
                 if (checkCollision(dino, ob)) {
                     if (boostTimer > 0) { obstacles.splice(i, 1); score += 100; }
-                    else { currentState = STATE.GAMEOVER; saveScore(score); }
+                    else triggerGameOver();
                 }
             });
 
-            birds.forEach(b => {
-                b.x -= (gameSpeed + 1); b.y = b.baseY + Math.sin(timer * b.freq + b.offset) * b.amp;
-                ctx.fillStyle = '#8e44ad'; ctx.fillRect(b.x, b.y, b.width, b.height);
-                if (checkCollision(dino, b)) { currentState = STATE.GAMEOVER; saveScore(score); }
+            birds.forEach((b) => {
+                b.x -= (gameSpeed + 1);
+                b.y = b.baseY + Math.sin(timer * b.freq + b.offset) * b.amp;
+                ctx.fillStyle = '#8e44ad';
+                ctx.fillRect(b.x, b.y, b.width, b.height);
+                if (checkCollision(dino, b)) triggerGameOver();
             });
 
             items.forEach((it, i) => {
-                it.x -= gameSpeed; ctx.fillStyle = '#f1c40f'; ctx.beginPath(); ctx.arc(it.x + 12, it.y + 12, 12, 0, Math.PI * 2); ctx.fill();
-                if (checkCollision(dino, it)) { items.splice(i, 1); boostTimer = 300; }
+                it.x -= gameSpeed;
+                ctx.fillStyle = '#f1c40f';
+                ctx.beginPath();
+                ctx.arc(it.x + 12, it.y + 12, 12, 0, Math.PI * 2);
+                ctx.fill();
+                if (checkCollision(dino, it)) {
+                    items.splice(i, 1);
+                    boostTimer = 300;
+                }
             });
 
-            obstacles = obstacles.filter(o => o.x > -50); birds = birds.filter(b => b.x > -50); items = items.filter(it => it.x > -50);
-            score++; scoreElement.innerText = `分數: ${score}`;
+            obstacles = obstacles.filter(o => o.x > -50);
+            birds = birds.filter(b => b.x > -50);
+            items = items.filter(it => it.x > -50);
+
+            score++;
+            scoreElement.innerText = `分數: ${score}`;
         }
 
-        function checkCollision(a, b) { return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y; }
+        function triggerGameOver() {
+            currentState = STATE.GAMEOVER;
+            const finalScore = score;
+            setTimeout(() => saveScoreToFirebase(finalScore), 100);
+        }
+
+        function checkCollision(a, b) {
+            return a.x < b.x + b.width && a.x + a.width > b.x &&
+                   a.y < b.y + b.height && a.y + a.height > b.y;
+        }
 
         function animate() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height); dino.draw();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            dino.draw();
+
             if (currentState === STATE.WAITING) {
-                ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "24px Arial"; ctx.fillText("按下 [空白鍵] 開始遊戲", canvas.width / 2, canvas.height / 2 + 10);
-            } else if (currentState === STATE.PLAYING) { dino.update(); handleLogic(); }
-            else if (currentState === STATE.GAMEOVER) {
-                ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = "white"; ctx.textAlign = "center"; ctx.font = "bold 30px Arial"; ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
-                ctx.font = "20px Arial"; ctx.fillText(`最終得分: ${score} | 按下 [空白鍵] 重玩`, canvas.width / 2, canvas.height / 2 + 30);
+                ctx.fillStyle = "rgba(0,0,0,0.5)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "white";
+                ctx.textAlign = "center";
+                ctx.font = "24px Arial";
+                ctx.fillText("按下 [空白鍵] 開始遊戲", canvas.width / 2, canvas.height / 2 + 10);
+            } else if (currentState === STATE.PLAYING) {
+                dino.update();
+                handleLogic();
+            } else if (currentState === STATE.GAMEOVER) {
+                ctx.fillStyle = "rgba(0,0,0,0.8)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "white";
+                ctx.textAlign = "center";
+                ctx.font = "bold 30px Arial";
+                ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
+                ctx.font = "20px Arial";
+                ctx.fillText(`最終得分: ${score} | 按下 [空白鍵] 重玩`, canvas.width / 2, canvas.height / 2 + 30);
             }
             requestAnimationFrame(animate);
         }
 
         function handleInput() {
-            if (currentState !== STATE.PLAYING) { score = 0; timer = 0; boostTimer = 0; baseSpeed = 5; obstacles = []; birds = []; items = []; dino.y = 150; currentState = STATE.PLAYING; }
-            else dino.jump();
+            if (currentState !== STATE.PLAYING) {
+                resetGame();
+                currentState = STATE.PLAYING;
+            } else {
+                dino.jump();
+            }
         }
 
-        window.addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); handleInput(); } });
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') { e.preventDefault(); handleInput(); }
+        });
         canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); });
+
         animate();
     </script>
 </body>
