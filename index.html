@@ -3,124 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>超速方塊 - 聯網排行榜版</title>
+    <title>超速方塊 - 全球排行榜版</title>
     <style>
-        body { text-align: center; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f0f0; margin: 0; padding: 20px; }
-        #gameContainer { width: 800px; margin: 20px auto; position: relative; }
-        canvas { background-color: #fff; border-bottom: 3px solid #333; display: block; box-shadow: 0 10px 20px rgba(0,0,0,0.1); width: 800px; height: 200px; }
-        .info { color: #555; }
-        .status { font-weight: bold; color: #e67e22; height: 24px; margin-top: 10px; }
-        .speed-monitor { font-family: monospace; color: #2980b9; font-size: 14px; margin-top: 5px; }
+        body { text-align: center; font-family: 'Segoe UI', "Microsoft JhengHei", sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
+        #gameLayout { display: flex; justify-content: center; align-items: flex-start; gap: 30px; max-width: 1200px; margin: 20px auto; flex-wrap: wrap; }
+        
+        /* 遊戲區域 */
+        #gameContainer { width: 800px; position: relative; }
+        canvas { background-color: #fff; border-bottom: 4px solid #333; display: block; box-shadow: 0 10px 30px rgba(0,0,0,0.15); border-radius: 4px; width: 800px; height: 200px; }
+        
+        /* 排行榜區域 */
+        #leaderboard { 
+            width: 280px; background: white; padding: 20px; border-radius: 12px; 
+            box-shadow: 0 8px 20px rgba(0,0,0,0.1); text-align: left; border-top: 5px solid #e67e22;
+        }
+        #leaderboard h3 { margin-top: 0; color: #2c3e50; border-bottom: 2px solid #eee; padding-bottom: 10px; display: flex; justify-content: space-between; }
+        #leaderboardList { min-height: 150px; }
+        .score-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f9f9f9; font-size: 15px; transition: 0.3s; }
+        .score-item:hover { background-color: #fff9f4; }
+        .score-rank { font-weight: bold; color: #e67e22; width: 25px; display: inline-block; }
+        .score-name { color: #34495e; font-weight: 500; }
+        .score-val { font-weight: bold; color: #2980b9; }
 
-        /* 排行榜樣式 */
-        #leaderboardContainer {
-            width: 400px;
-            margin: 20px auto;
-            background: white;
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-        }
-        .leaderboard-title { color: #2c3e50; margin-bottom: 10px; border-bottom: 2px solid #eee; padding-bottom: 5px; }
-        .score-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 15px;
-            border-bottom: 1px solid #f9f9f9;
-        }
-        .score-row:last-child { border-bottom: none; }
-        .rank { font-weight: bold; color: #e67e22; margin-right: 5px; }
-        .loading { color: #999; font-style: italic; }
+        /* 狀態資訊 */
+        .info { color: #7f8c8d; margin-bottom: 10px; }
+        .status { font-weight: bold; color: #e67e22; height: 30px; margin-top: 10px; font-size: 1.1em; }
+        .speed-monitor { font-family: 'Courier New', monospace; color: #3498db; font-size: 14px; background: #ebf5fb; display: inline-block; padding: 5px 15px; border-radius: 20px; margin-top: 10px; }
+        #scoreDisplay { font-size: 24px; font-weight: bold; color: #2c3e50; margin: 15px 0; }
     </style>
 </head>
 <body>
-    <h2 class="info">按下 [空白鍵] 開始 / 跳躍</h2>
-    <div id="gameContainer">
-        <canvas id="gameCanvas"></canvas>
-    </div>
-    <div id="status" class="status"></div>
-    <div id="speedMonitor" class="speed-monitor">正常速度: 5.0 | 當前速度: 5.0</div>
-    <h3 id="score" class="info">分數: 0</h3>
+    <h2 class="info">按下 [ 空白鍵 ] 開始遊戲 / 跳躍 (可二段跳)</h2>
+    
+    <div id="gameLayout">
+        <div id="gameContainer">
+            <canvas id="gameCanvas"></canvas>
+            <div id="status" class="status"></div>
+            <div id="speedMonitor" class="speed-monitor">準備就緒</div>
+            <div id="scoreDisplay">分數: 0</div>
+        </div>
 
-    <div id="leaderboardContainer">
-        <h3 class="leaderboard-title">🏆 世界排行榜 (TOP 5)</h3>
-        <div id="leaderboardList" class="loading">正在連線至資料庫...</div>
+        <div id="leaderboard">
+            <h3><span>🏆 全球 TOP 10</span></h3>
+            <div id="leaderboardList">正在連線至伺服器...</div>
+        </div>
     </div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getDatabase, ref, push, set, query, orderByChild, limitToLast, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+        import { getDatabase, ref, push, set, onValue, query, orderByChild, limitToLast } 
+        from "https://www.gstatic.com/firebasejs/12.11.0/firebase-database.js";
 
-        // --- Firebase 配置 ---
+        // Firebase 配置
         const firebaseConfig = {
             apiKey: "AIzaSyApF4WnrcGhBLFgCLiVCByqy-i_7VnkduI",
             authDomain: "blockrush-d0924.firebaseapp.com",
-            databaseURL: "https://blockrush-d0924-default-rtdb.firebaseio.com", 
+            databaseURL: "https://blockrush-d0924-default-rtdb.firebaseio.com",
             projectId: "blockrush-d0924",
             storageBucket: "blockrush-d0924.firebasestorage.app",
             messagingSenderId: "645488897630",
             appId: "1:645488897630:web:f867d2c53dd602e299cecf"
         };
 
-        // 初始化 Firebase
+        // 初始化
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        const lbRef = ref(db, 'leaderboard');
+        const scoresRef = ref(db, 'leaderboard');
 
-        const leaderboardList = document.getElementById('leaderboardList');
-
-        // --- 1. 排行榜即時監聽邏輯 ---
-        const topScoresQuery = query(lbRef, orderByChild('score'), limitToLast(5));
-
-        onValue(topScoresQuery, (snapshot) => {
-            const data = snapshot.val();
-            if (!data) {
-                leaderboardList.innerHTML = "尚無排名，快來搶首榜！";
-                leaderboardList.classList.remove('loading');
-                return;
-            }
-
-            // 將物件轉為陣列並由高分到低分排序
-            const sortedList = Object.values(data).sort((a, b) => b.score - a.score);
-            
-            leaderboardList.innerHTML = "";
-            leaderboardList.classList.remove('loading');
-            sortedList.forEach((item, index) => {
-                leaderboardList.innerHTML += `
-                    <div class="score-row">
-                        <span><span class="rank">#${index + 1}</span> ${item.name}</span>
-                        <span>${item.score} 分</span>
-                    </div>`;
-            });
-        }, (error) => {
-            console.error("連線錯誤:", error);
-            leaderboardList.innerHTML = "連線失敗，請檢查資料庫 Rules 設定。";
-        });
-
-        // --- 2. 儲存分數邏輯 ---
-        async function saveScoreToFirebase(finalScore) {
-            const name = prompt(`遊戲結束！獲得 ${finalScore} 分！\n請輸入你的名字：`, "新玩家");
-            if (name && name.trim() !== "") {
-                try {
-                    const newScoreRef = push(lbRef);
-                    await set(newScoreRef, {
-                        name: name,
-                        score: finalScore,
-                        timestamp: Date.now()
-                    });
-                } catch (e) {
-                    console.error("儲存失敗:", e);
-                    alert("儲存失敗，請檢查資料庫規則是否已開啟。");
-                }
-            }
-        }
-
-        // --- 3. 遊戲核心代碼 ---
+        // 遊戲元件
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        const scoreElement = document.getElementById('score');
+        const scoreDisplay = document.getElementById('scoreDisplay');
         const statusElement = document.getElementById('status');
         const speedMonitor = document.getElementById('speedMonitor');
+        const leaderboardList = document.getElementById('leaderboardList');
 
         canvas.width = 800;
         canvas.height = 200;
@@ -128,9 +84,16 @@
         const STATE = { WAITING: 0, PLAYING: 1, GAMEOVER: 2 };
         let currentState = STATE.WAITING;
 
-        let score = 0, timer = 0, baseSpeed = 5, gameSpeed = 5, boostTimer = 0;
+        let score = 0;
+        let timer = 0;
+        let baseSpeed = 5;
+        let gameSpeed = 5;
+        let boostTimer = 0;
         const BOOST_MULT = 1.8;
-        let obstacles = [], birds = [], items = [];
+
+        let obstacles = [];
+        let birds = [];
+        let items = [];
 
         const dino = {
             x: 50, y: 150, width: 40, height: 40,
@@ -156,6 +119,48 @@
             }
         };
 
+        // --- 排行榜邏輯 ---
+        function listenLeaderboard() {
+            const topScoresQuery = query(scoresRef, orderByChild('score'), limitToLast(10));
+            onValue(topScoresQuery, (snapshot) => {
+                const data = snapshot.val();
+                let scoreArray = [];
+                if (data) {
+                    Object.keys(data).forEach(key => scoreArray.push(data[key]));
+                    scoreArray.sort((a, b) => b.score - a.score);
+                    leaderboardList.innerHTML = scoreArray.map((item, index) => `
+                        <div class="score-item">
+                            <span><span class="score-rank">${index + 1}</span><span class="score-name">${item.name}</span></span>
+                            <span class="score-val">${Math.floor(item.score)}</span>
+                        </div>
+                    `).join('');
+                } else {
+                    leaderboardList.innerHTML = "尚未有得分記錄";
+                }
+            }, (error) => {
+                console.error("Firebase 讀取錯誤:", error);
+                leaderboardList.innerHTML = "讀取失敗，請檢查 Firebase 規則";
+            });
+        }
+
+        async function uploadScore(finalScore) {
+            const name = prompt("🎉 挑戰結束！你的得分是 " + finalScore + "\n請輸入你的大名：", "玩家" + Math.floor(Math.random()*1000));
+            if (name) {
+                try {
+                    const newScoreRef = push(scoresRef);
+                    await set(newScoreRef, {
+                        name: name.substring(0, 8),
+                        score: finalScore,
+                        timestamp: Date.now()
+                    });
+                } catch (e) {
+                    console.error("寫入失敗:", e);
+                    alert("上傳失敗，請確認 Firebase Rules 已設為允許讀寫。");
+                }
+            }
+        }
+
+        // --- 遊戲引擎 ---
         function resetGame() {
             score = 0; timer = 0; boostTimer = 0;
             baseSpeed = 5; gameSpeed = 5;
@@ -166,45 +171,47 @@
 
         function handleLogic() {
             timer++;
-            baseSpeed = 5 + (Math.floor(score / 200) * 0.5);
+            baseSpeed = 5 + (Math.floor(score / 500) * 0.5);
+
             if (boostTimer > 0) {
                 boostTimer--;
                 gameSpeed = baseSpeed * BOOST_MULT;
-                statusElement.innerText = "⚡ 道具加速中！ (無視仙人掌) ⚡";
+                statusElement.innerText = "🚀 衝刺模式！無視障礙物 🚀";
             } else {
                 gameSpeed = baseSpeed; 
                 statusElement.innerText = "";
             }
 
-            speedMonitor.innerText = `正常速度: ${baseSpeed.toFixed(1)} | 當前速度: ${gameSpeed.toFixed(1)} ${boostTimer > 0 ? '(BOOST!)' : ''}`;
+            speedMonitor.innerText = `基礎速度: ${baseSpeed.toFixed(1)} | 當前速度: ${gameSpeed.toFixed(1)}`;
 
-            if (timer % 100 === 0) obstacles.push({ x: 800, y: 160, width: 25, height: 40 });
-            if (timer % 180 === 0) {
+            if (timer % 110 === 0) obstacles.push({ x: 800, y: 160, width: 25, height: 40 });
+            if (timer % 240 === 0) {
                 birds.push({ 
                     x: 800, baseY: 80, width: 35, height: 15, 
                     offset: Math.random() * 10,
-                    amp: 40 + Math.random() * 40,
-                    freq: 0.1 + Math.random() * 0.1
+                    amp: 30 + Math.random() * 40,
+                    freq: 0.05 + Math.random() * 0.05
                 });
             }
             if (timer % 600 === 0) items.push({ x: 800, y: 60, width: 25, height: 25 });
 
+            // 物件更新
             obstacles.forEach((ob, i) => {
                 ob.x -= gameSpeed;
                 ctx.fillStyle = '#27ae60';
                 ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
                 if (checkCollision(dino, ob)) {
                     if (boostTimer > 0) { obstacles.splice(i, 1); score += 100; }
-                    else triggerGameOver();
+                    else endGame();
                 }
             });
 
-            birds.forEach((b) => {
+            birds.forEach((b, i) => {
                 b.x -= (gameSpeed + 1);
                 b.y = b.baseY + Math.sin(timer * b.freq + b.offset) * b.amp;
                 ctx.fillStyle = '#8e44ad';
                 ctx.fillRect(b.x, b.y, b.width, b.height);
-                if (checkCollision(dino, b)) triggerGameOver();
+                if (checkCollision(dino, b)) endGame();
             });
 
             items.forEach((it, i) => {
@@ -223,14 +230,13 @@
             birds = birds.filter(b => b.x > -50);
             items = items.filter(it => it.x > -50);
 
-            score++;
-            scoreElement.innerText = `分數: ${score}`;
+            score += 0.5; 
+            scoreDisplay.innerText = `分數: ${Math.floor(score)}`;
         }
 
-        function triggerGameOver() {
+        function endGame() {
             currentState = STATE.GAMEOVER;
-            const finalScore = score;
-            setTimeout(() => saveScoreToFirebase(finalScore), 100);
+            uploadScore(Math.floor(score));
         }
 
         function checkCollision(a, b) {
@@ -243,12 +249,12 @@
             dino.draw();
 
             if (currentState === STATE.WAITING) {
-                ctx.fillStyle = "rgba(0,0,0,0.5)";
+                ctx.fillStyle = "rgba(0,0,0,0.4)";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.fillStyle = "white";
                 ctx.textAlign = "center";
                 ctx.font = "24px Arial";
-                ctx.fillText("按下 [空白鍵] 開始遊戲", canvas.width / 2, canvas.height / 2 + 10);
+                ctx.fillText("按下 [ 空白鍵 ] 開始挑戰", canvas.width / 2, canvas.height / 2 + 10);
             } else if (currentState === STATE.PLAYING) {
                 dino.update();
                 handleLogic();
@@ -260,7 +266,7 @@
                 ctx.font = "bold 30px Arial";
                 ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
                 ctx.font = "20px Arial";
-                ctx.fillText(`最終得分: ${score} | 按下 [空白鍵] 重玩`, canvas.width / 2, canvas.height / 2 + 30);
+                ctx.fillText(`最終得分: ${Math.floor(score)} | 再按一次空白鍵重玩`, canvas.width / 2, canvas.height / 2 + 30);
             }
             requestAnimationFrame(animate);
         }
@@ -277,8 +283,9 @@
         window.addEventListener('keydown', (e) => {
             if (e.code === 'Space') { e.preventDefault(); handleInput(); }
         });
-        canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); });
 
+        // 啟動連線與遊戲
+        listenLeaderboard();
         animate();
     </script>
 </body>
