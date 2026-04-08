@@ -121,7 +121,8 @@
                     leaderboardList.innerHTML = "<li>目前尚無排行</li>";
                 }
             } catch (e) {
-                leaderboardList.innerHTML = "<li>載入失敗</li>";
+                console.error(e); // 在 F12 顯示完整錯誤
+    leaderboardList.innerHTML = `<li>載入失敗: ${e.message}</li>`;
             }
         }
 
